@@ -1,7 +1,5 @@
 import { neon } from '@neondatabase/serverless';
 
-// Lazy client — neon() must NOT be called at module load time because
-// DATABASE_URL is unavailable during `next build` on Vercel.
 let _client: ReturnType<typeof neon> | null = null;
 
 function getClient() {
@@ -9,8 +7,8 @@ function getClient() {
   return _client;
 }
 
-// Thin tagged-template wrapper with the same call signature used across routes.
-const sql = (strings: TemplateStringsArray, ...values: unknown[]) =>
-  getClient()(strings, ...values);
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const sql = (strings: TemplateStringsArray, ...values: unknown[]): Promise<any[]> =>
+  getClient()(strings, ...values) as Promise<any[]>;
 
 export default sql;
