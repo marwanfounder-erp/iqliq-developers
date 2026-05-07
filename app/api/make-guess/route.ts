@@ -52,11 +52,16 @@ export async function POST(req: NextRequest) {
       players: updatedPlayers,
     };
 
-    await pusher.trigger(`room-${room.code}`, 'guess-made', payload);
+    try {
+      await pusher.trigger(`room-${room.code}`, 'guess-made', payload);
+    } catch (pusherErr) {
+      console.error('[make-guess] Pusher failed:', pusherErr instanceof Error ? pusherErr.message : pusherErr);
+    }
 
     return NextResponse.json({ ok: true, ...payload });
   } catch (err) {
-    console.error(err);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('[make-guess]', message);
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

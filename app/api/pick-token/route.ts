@@ -21,11 +21,16 @@ export async function POST(req: NextRequest) {
       SELECT id, name, token, score FROM players WHERE room_id = ${room.id} ORDER BY joined_at
     `;
 
-    await pusher.trigger(`room-${room.code}`, 'token-picked', { players });
+    try {
+      await pusher.trigger(`room-${room.code}`, 'token-picked', { players });
+    } catch (pusherErr) {
+      console.error('[pick-token] Pusher failed:', pusherErr instanceof Error ? pusherErr.message : pusherErr);
+    }
 
     return NextResponse.json({ ok: true });
   } catch (err) {
-    console.error(err);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('[pick-token]', message);
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

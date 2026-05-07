@@ -44,11 +44,17 @@ export async function POST(req: NextRequest) {
     }
 
     await sql`UPDATE rooms SET state = 'revealing' WHERE id = ${room.id}`;
-    await pusher.trigger(`room-${room.code}`, 'roles-assigned', { state: 'revealing' });
+
+    try {
+      await pusher.trigger(`room-${room.code}`, 'roles-assigned', { state: 'revealing' });
+    } catch (pusherErr) {
+      console.error('[assign-roles] Pusher failed:', pusherErr instanceof Error ? pusherErr.message : pusherErr);
+    }
 
     return NextResponse.json({ ok: true });
   } catch (err) {
-    console.error(err);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('[assign-roles]', message);
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

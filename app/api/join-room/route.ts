@@ -28,7 +28,11 @@ export async function POST(req: NextRequest) {
       SELECT id, name, token, score FROM players WHERE room_id = ${room.id} ORDER BY joined_at
     `;
 
-    await pusher.trigger(`room-${room.code}`, 'player-joined', { players });
+    try {
+      await pusher.trigger(`room-${room.code}`, 'player-joined', { players });
+    } catch (pusherErr) {
+      console.error('[join-room] Pusher trigger failed:', pusherErr instanceof Error ? pusherErr.message : pusherErr);
+    }
 
     return NextResponse.json({ roomCode: room.code, playerId: player.id });
   } catch (err) {
