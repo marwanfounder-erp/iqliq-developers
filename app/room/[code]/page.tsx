@@ -125,6 +125,7 @@ export default function RoomPage() {
     });
     channel.bind('guessing-started', () => {
       setRoom(prev => prev ? { ...prev, state: 'guessing' } : prev);
+      fetchRoom(); // immediately sync myRole so police sees guess UI without delay
     });
     channel.bind('guess-made', (data: GuessResult & { players: Player[] }) => {
       setRoom(prev => prev ? { ...prev, state: 'result' } : prev);
@@ -274,6 +275,8 @@ export default function RoomPage() {
   const isHost = players[0]?.id === myPlayerId;
   const tokensPicked = players.filter(p => p.token).length;
   const allHaveTokens = players.length >= 4 && tokensPicked === players.length;
+  const takenTokens = new Set(players.filter(p => p.id !== myPlayerId && p.token).map(p => p.token as string));
+  const hasScores = players.some(p => p.score > 0);
 
   // ── Loading ───────────────────────────────────────────────────────────────
 
@@ -355,26 +358,59 @@ export default function RoomPage() {
           )}
         </div>
 
+        {/* Scoreboard — only after at least one round */}
+        {hasScores && (
+          <div className="card">
+            <h2 className="font-semibold text-gray-900 mb-3">Scores</h2>
+            <div className="flex flex-col gap-2">
+              {[...players].sort((a, b) => b.score - a.score).map((p, i) => {
+                const idx = players.findIndex(pl => pl.id === p.id);
+                return (
+                  <div key={p.id} className="flex items-center gap-3">
+                    <span className="text-xs font-bold text-gray-300 w-4">#{i + 1}</span>
+                    <Avatar name={p.name} index={idx} size="sm" />
+                    <span className="flex-1 font-medium text-gray-800 truncate">
+                      {p.name}{p.id === myPlayerId ? ' (you)' : ''}
+                    </span>
+                    <span className="font-black text-gray-900">{p.score}</span>
+                    <span className="text-xs text-gray-400">pts</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {/* Token picker */}
         {myPlayer && !myPlayer.token && (
           <div className="card">
             <h2 className="font-semibold text-gray-900 mb-1">Pick your token</h2>
-            <p className="text-sm text-gray-400 mb-4">Choose an item to carry — the thief will try to blend in</p>
+            <p className="text-sm text-gray-400 mb-4">Choose an item — each token can only be held by one player</p>
             <div className="grid grid-cols-4 gap-2 mb-4">
-              {TOKENS.map(t => (
-                <button
-                  key={t.id}
-                  onClick={() => setSelectedToken(t.id)}
-                  className={`flex flex-col items-center gap-1 p-2.5 rounded-xl border-2 transition-all active:scale-95 ${
-                    selectedToken === t.id
-                      ? 'border-[#5b50e8] bg-[#5b50e8]/5 shadow-sm'
-                      : 'border-gray-100 hover:border-gray-200 bg-gray-50'
-                  }`}
-                >
-                  <span className="text-2xl leading-none">{t.emoji}</span>
-                  <span className="text-[10px] text-gray-500 leading-tight">{t.label}</span>
-                </button>
-              ))}
+              {TOKENS.map(t => {
+                const taken = takenTokens.has(t.id);
+                const selected = selectedToken === t.id;
+                return (
+                  <button
+                    key={t.id}
+                    onClick={() => !taken && setSelectedToken(t.id)}
+                    disabled={taken}
+                    className={`flex flex-col items-center gap-1 p-2.5 rounded-xl border-2 transition-all relative ${
+                      taken
+                        ? 'border-gray-100 bg-gray-50 opacity-40 cursor-not-allowed'
+                        : selected
+                        ? 'border-[#5b50e8] bg-[#5b50e8]/5 shadow-sm active:scale-95'
+                        : 'border-gray-100 hover:border-gray-200 bg-gray-50 active:scale-95'
+                    }`}
+                  >
+                    <span className="text-2xl leading-none">{t.emoji}</span>
+                    <span className="text-[10px] text-gray-500 leading-tight">{t.label}</span>
+                    {taken && (
+                      <span className="absolute top-1 right-1 text-[8px] text-gray-400 font-bold">✕</span>
+                    )}
+                  </button>
+                );
+              })}
             </div>
             <button onClick={handlePickToken} disabled={!selectedToken || actionLoading} className="btn-primary w-full">
               {actionLoading ? 'Locking in...' : selectedToken ? `Lock in ${tokenLabel(selectedToken)}` : 'Pick a token above'}
@@ -511,6 +547,17 @@ export default function RoomPage() {
   // ═══════════════════════════════════════════════════════════════════════════
 
   if (room.state === 'guessing') {
+    // myRole may arrive a tick late via polling — wait rather than showing wrong UI
+    if (!myRole) {
+      return (
+        <div className="flex items-center justify-center min-h-[80vh]">
+          <div className="flex flex-col items-center gap-3">
+            <div className="w-8 h-8 border-2 border-[#5b50e8] border-t-transparent rounded-full animate-spin" />
+            <p className="text-sm text-gray-400">Loading your role...</p>
+          </div>
+        </div>
+      );
+    }
     const isPolice = myRole === 'police';
     const suspects = players.filter(p => p.id !== myPlayerId);
     const selectedPlayer = players.find(p => p.id === selectedGuess);
