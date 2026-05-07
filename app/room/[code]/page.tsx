@@ -95,12 +95,13 @@ export default function RoomPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [code]);
 
-  // Polling fallback for when Pusher env vars aren't configured
+  // Poll every 2 s in all states — primary update mechanism when Pusher isn't
+  // configured, and a safety net for any missed events.
   useEffect(() => {
-    if (!room || room.state === 'waiting' || room.state === 'result') return;
-    const interval = setInterval(() => fetchRoom(), 3000);
+    if (!myPlayerId) return;
+    const interval = setInterval(() => fetchRoom(), 2000);
     return () => clearInterval(interval);
-  }, [room?.state, fetchRoom]);
+  }, [myPlayerId, fetchRoom]);
 
   // Pusher subscription
   useEffect(() => {
@@ -175,6 +176,8 @@ export default function RoomPage() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ action: 'start-guessing' }),
           });
+          // Immediately apply guessing state so police sees the guess UI
+          setRoom(prev => prev ? { ...prev, state: 'guessing' } : prev);
         }
       }, 1000);
     }
@@ -188,6 +191,7 @@ export default function RoomPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ roomCode: code, playerId: myPlayerId, token: selectedToken }),
     });
+    await fetchRoom();
     setActionLoading(false);
   }
 
@@ -200,18 +204,31 @@ export default function RoomPage() {
       body: JSON.stringify({ roomCode: code }),
     });
     const data = await res.json();
-    if (!res.ok) setError(data.error);
+    if (!res.ok) {
+      setError(data.error);
+      setActionLoading(false);
+      return;
+    }
+    await fetchRoom();
     setActionLoading(false);
   }
 
   async function handleMakeGuess() {
     if (!selectedGuess) return;
     setActionLoading(true);
-    await fetch('/api/make-guess', {
+    const res = await fetch('/api/make-guess', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ roomCode: code, guessedPlayerId: selectedGuess }),
     });
+    const data = await res.json();
+    if (res.ok) {
+      // Apply result immediately from response without waiting for Pusher
+      setRoom(prev => prev ? { ...prev, state: 'result' } : prev);
+      setGuessResult({ correct: data.correct, guessedName: data.guessedName, thiefName: data.thiefName, thiefToken: data.thiefToken });
+      setPlayers(data.players);
+    }
+    await fetchRoom();
     setActionLoading(false);
   }
 
@@ -222,6 +239,12 @@ export default function RoomPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'next-round' }),
     });
+    setRoleRevealed(false);
+    setGuessResult(null);
+    setMyRole(null);
+    setSelectedToken(null);
+    setSelectedGuess(null);
+    await fetchRoom();
     setActionLoading(false);
   }
 

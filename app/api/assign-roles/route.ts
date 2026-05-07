@@ -18,9 +18,6 @@ export async function POST(req: NextRequest) {
 
     const [room] = await sql`SELECT id, code, state FROM rooms WHERE code = ${roomCode}`;
     if (!room) return NextResponse.json({ error: 'Room not found' }, { status: 404 });
-    if (room.state !== 'waiting') {
-      return NextResponse.json({ error: 'Game already started' }, { status: 400 });
-    }
 
     const players = await sql`
       SELECT id FROM players WHERE room_id = ${room.id} ORDER BY joined_at
@@ -36,14 +33,25 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'All players must pick a token first' }, { status: 400 });
     }
 
+    // Atomically claim the state transition — prevents duplicate role assignment
+    // if two requests arrive simultaneously (race condition / double-tap).
+    // Only one UPDATE will match WHERE state='waiting'; the other gets 0 rows.
+    const claimed = await sql`
+      UPDATE rooms SET state = 'revealing'
+      WHERE id = ${room.id} AND state = 'waiting'
+      RETURNING id
+    `;
+    if (claimed.length === 0) {
+      return NextResponse.json({ error: 'Game already started' }, { status: 400 });
+    }
+
+    // State is now exclusively ours — assign roles safely
     const roles: string[] = ['thief', 'police', ...Array(players.length - 2).fill('civilian')];
     const shuffled = shuffle(roles);
 
     for (let i = 0; i < players.length; i++) {
       await sql`UPDATE players SET role = ${shuffled[i]} WHERE id = ${players[i].id}`;
     }
-
-    await sql`UPDATE rooms SET state = 'revealing' WHERE id = ${room.id}`;
 
     try {
       await pusher.trigger(`room-${room.code}`, 'roles-assigned', { state: 'revealing' });
