@@ -1,8 +1,9 @@
 CREATE TABLE IF NOT EXISTS rooms (
-  id      SERIAL PRIMARY KEY,
-  code    VARCHAR(6) UNIQUE NOT NULL,
-  state   VARCHAR(20) NOT NULL DEFAULT 'waiting',
-  created_at TIMESTAMP DEFAULT NOW()
+  id          SERIAL PRIMARY KEY,
+  code        VARCHAR(6) UNIQUE NOT NULL,
+  state       VARCHAR(20) NOT NULL DEFAULT 'waiting',
+  result_json TEXT,
+  created_at  TIMESTAMP DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS players (

@@ -61,6 +61,8 @@ export default function RoomPage() {
   const [roleRevealed, setRoleRevealed] = useState(false);
   const [countdown, setCountdown] = useState(5);
   const [countingDown, setCountingDown] = useState(false);
+  const [hideCountdown, setHideCountdown] = useState(5);
+  const [roleHidden, setRoleHidden] = useState(false);
   const [guessResult, setGuessResult] = useState<GuessResult | null>(null);
   const [selectedToken, setSelectedToken] = useState<string | null>(null);
   const [selectedGuess, setSelectedGuess] = useState<number | null>(null);
@@ -71,7 +73,6 @@ export default function RoomPage() {
 
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // ── fetchRoom also syncs myRole so the police guess UI always appears correctly
   const fetchRoom = useCallback(async (pid?: number) => {
     const id = pid ?? myPlayerId;
     const url = `/api/room/${code}${id ? `?playerId=${id}` : ''}`;
@@ -80,7 +81,10 @@ export default function RoomPage() {
     const data = await res.json();
     setRoom(data.room);
     setPlayers(data.players);
+    // Sync role — safe because the reveal UI is gated by roleRevealed, not myRole
     if (data.myRole) setMyRole(data.myRole);
+    // Sync persisted result so ALL devices exit the loading spinner simultaneously
+    if (data.result) setGuessResult(data.result);
     setLoading(false);
   }, [code, myPlayerId, router]);
 
@@ -130,6 +134,8 @@ export default function RoomPage() {
     channel.bind('next-round', () => {
       setRoom(prev => prev ? { ...prev, state: 'waiting' } : prev);
       setRoleRevealed(false);
+      setRoleHidden(false);
+      setHideCountdown(5);
       setGuessResult(null);
       setMyRole(null);
       setSelectedToken(null);
@@ -159,6 +165,8 @@ export default function RoomPage() {
       setMyRole(role);
     }
     setRoleRevealed(true);
+    setRoleHidden(false);
+    setHideCountdown(5);
 
     if (role === 'police') {
       setCountingDown(true);
@@ -178,6 +186,17 @@ export default function RoomPage() {
           });
           // Immediately apply guessing state so police sees the guess UI
           setRoom(prev => prev ? { ...prev, state: 'guessing' } : prev);
+        }
+      }, 1000);
+    } else {
+      // Non-police: auto-hide role after 5 s so others can't peek at the screen
+      let h = 5;
+      const hideTimer = setInterval(() => {
+        h--;
+        setHideCountdown(h);
+        if (h <= 0) {
+          clearInterval(hideTimer);
+          setRoleHidden(true);
         }
       }, 1000);
     }
@@ -216,18 +235,14 @@ export default function RoomPage() {
   async function handleMakeGuess() {
     if (!selectedGuess) return;
     setActionLoading(true);
-    const res = await fetch('/api/make-guess', {
+    await fetch('/api/make-guess', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ roomCode: code, guessedPlayerId: selectedGuess }),
     });
-    const data = await res.json();
-    if (res.ok) {
-      // Apply result immediately from response without waiting for Pusher
-      setRoom(prev => prev ? { ...prev, state: 'result' } : prev);
-      setGuessResult({ correct: data.correct, guessedName: data.guessedName, thiefName: data.thiefName, thiefToken: data.thiefToken });
-      setPlayers(data.players);
-    }
+    // Result is stored in DB — fetchRoom will pick it up for ALL devices at the
+    // same time via polling. Do NOT apply it locally here so the police and
+    // everyone else see the reveal simultaneously.
     await fetchRoom();
     setActionLoading(false);
   }
@@ -240,6 +255,8 @@ export default function RoomPage() {
       body: JSON.stringify({ action: 'next-round' }),
     });
     setRoleRevealed(false);
+    setRoleHidden(false);
+    setHideCountdown(5);
     setGuessResult(null);
     setMyRole(null);
     setSelectedToken(null);
@@ -450,9 +467,23 @@ export default function RoomPage() {
                 </div>
               )}
 
-              {myRole !== 'police' && (
-                <div className="w-full bg-gray-50 border border-gray-100 rounded-2xl p-4">
-                  <p className="text-sm text-gray-500">🚔 Police is reviewing everyone's tokens...</p>
+              {myRole !== 'police' && !roleHidden && (
+                <div className="w-full">
+                  <div className="bg-amber-50 border border-amber-100 rounded-2xl p-3 text-center mb-2">
+                    <p className="text-xs text-amber-600 font-medium">Screen hides in {hideCountdown}s — don&apos;t let others peek!</p>
+                  </div>
+                  <button onClick={() => setRoleHidden(true)} className="btn-secondary w-full text-sm py-2">
+                    Hide now
+                  </button>
+                </div>
+              )}
+              {myRole !== 'police' && roleHidden && (
+                <div className="w-full bg-gray-50 border border-gray-100 rounded-2xl p-4 text-center">
+                  <p className="text-2xl mb-1">🔒</p>
+                  <p className="text-sm text-gray-500">Role hidden</p>
+                  <button onClick={() => { setRoleHidden(false); setHideCountdown(3); }} className="text-xs text-[#5b50e8] mt-1 underline">
+                    Peek again (3 s)
+                  </button>
                 </div>
               )}
             </>

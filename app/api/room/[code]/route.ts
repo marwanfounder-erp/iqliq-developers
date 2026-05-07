@@ -7,7 +7,7 @@ export async function GET(req: NextRequest, { params }: { params: { code: string
     const { code } = params;
     const playerId = req.nextUrl.searchParams.get('playerId');
 
-    const [room] = await sql`SELECT id, code, state FROM rooms WHERE code = ${code}`;
+    const [room] = await sql`SELECT id, code, state, result_json FROM rooms WHERE code = ${code}`;
     if (!room) return NextResponse.json({ error: 'Room not found' }, { status: 404 });
 
     const players = await sql`
@@ -22,7 +22,9 @@ export async function GET(req: NextRequest, { params }: { params: { code: string
       myRole = player?.role ?? null;
     }
 
-    return NextResponse.json({ room, players, myRole });
+    const result = room.result_json ? JSON.parse(room.result_json) : null;
+
+    return NextResponse.json({ room: { id: room.id, code: room.code, state: room.state }, players, myRole, result });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error('[room GET]', message);
@@ -40,7 +42,7 @@ export async function POST(req: NextRequest, { params }: { params: { code: strin
 
     if (action === 'next-round') {
       await sql`UPDATE players SET token = NULL, role = NULL WHERE room_id = ${room.id}`;
-      await sql`UPDATE rooms SET state = 'waiting' WHERE id = ${room.id}`;
+      await sql`UPDATE rooms SET state = 'waiting', result_json = NULL WHERE id = ${room.id}`;
       try {
         await pusher.trigger(`room-${room.code}`, 'next-round', {});
       } catch (pusherErr) {

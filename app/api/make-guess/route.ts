@@ -38,19 +38,21 @@ export async function POST(req: NextRequest) {
       await sql`UPDATE players SET score = score + 1 WHERE id = ${thief.id}`;
     }
 
-    await sql`UPDATE rooms SET state = 'result' WHERE id = ${room.id}`;
+    const resultJson = JSON.stringify({
+      correct,
+      guessedName: guessed.name,
+      thiefName: thief.name,
+      thiefToken: thief.token,
+    });
+
+    // Persist result so all clients can fetch it via polling
+    await sql`UPDATE rooms SET state = 'result', result_json = ${resultJson} WHERE id = ${room.id}`;
 
     const updatedPlayers = await sql`
       SELECT id, name, token, score FROM players WHERE room_id = ${room.id} ORDER BY joined_at
     `;
 
-    const payload = {
-      correct,
-      guessedName: guessed.name,
-      thiefName: thief.name,
-      thiefToken: thief.token,
-      players: updatedPlayers,
-    };
+    const payload = { correct, guessedName: guessed.name, thiefName: thief.name, thiefToken: thief.token, players: updatedPlayers };
 
     try {
       await pusher.trigger(`room-${room.code}`, 'guess-made', payload);
@@ -58,7 +60,8 @@ export async function POST(req: NextRequest) {
       console.error('[make-guess] Pusher failed:', pusherErr instanceof Error ? pusherErr.message : pusherErr);
     }
 
-    return NextResponse.json({ ok: true, ...payload });
+    // Return only { ok: true } — the result is fetched by all clients via polling/Pusher
+    return NextResponse.json({ ok: true });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error('[make-guess]', message);
