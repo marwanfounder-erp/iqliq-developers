@@ -5,7 +5,6 @@ export const metadata: Metadata = {
   title: 'Thief — Party Game',
   description: 'A fun party game of deception and deduction',
 };
-
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
