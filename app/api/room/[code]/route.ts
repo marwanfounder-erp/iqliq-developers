@@ -7,7 +7,7 @@ export async function GET(req: NextRequest, { params }: { params: { code: string
     const { code } = params;
     const playerId = req.nextUrl.searchParams.get('playerId');
 
-    const [room] = await sql`SELECT id, code, state, result_json FROM rooms WHERE code = ${code}`;
+    const [room] = await sql`SELECT id, code, state FROM rooms WHERE code = ${code}`;
     if (!room) return NextResponse.json({ error: 'Room not found' }, { status: 404 });
 
     const players = await sql`
@@ -22,7 +22,15 @@ export async function GET(req: NextRequest, { params }: { params: { code: string
       myRole = player?.role ?? null;
     }
 
-    const result = room.result_json ? JSON.parse(room.result_json) : null;
+    // result_json is a newer column — fetch separately so a missing column
+    // (before running the migration) never crashes the whole endpoint.
+    let result: Record<string, unknown> | null = null;
+    try {
+      const [row] = await sql`SELECT result_json FROM rooms WHERE id = ${room.id}`;
+      result = row?.result_json ? JSON.parse(row.result_json) : null;
+    } catch {
+      // column not yet added — run: ALTER TABLE rooms ADD COLUMN IF NOT EXISTS result_json TEXT;
+    }
 
     return NextResponse.json({ room: { id: room.id, code: room.code, state: room.state }, players, myRole, result });
   } catch (err) {
