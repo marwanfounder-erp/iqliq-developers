@@ -580,7 +580,7 @@ export default function RoomPage() {
                 {cfg.icon}
               </div>
               <div>
-                <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-1">You are the</p>
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-1">{myPlayer?.name} is the</p>
                 <h2 className={`text-4xl font-black ${cfg.text}`}>{cfg.label}</h2>
                 {cfg.pts && (
                   <span className="inline-block mt-1 text-sm font-bold text-green-600 bg-green-50 border border-green-100 px-3 py-0.5 rounded-full">
