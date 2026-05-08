@@ -5,8 +5,16 @@ import { useParams, useRouter } from 'next/navigation';
 import Pusher from 'pusher-js';
 
 type Player = { id: number; name: string; token: string | null; score: number };
-type Room = { id: number; code: string; state: string };
-type GuessResult = { correct: boolean; guessedName: string; thiefName: string; thiefToken: string };
+type Room   = { id: number; code: string; state: string; roundCount: number };
+type PointsEarned = { id: number; pts: number };
+type GuessResult  = {
+  correct: boolean;
+  guessedName: string;
+  thiefName: string;
+  thiefToken: string;
+  gameOver?: boolean;
+  pointsEarned?: PointsEarned[];
+};
 
 const TOKENS = [
   { id: 'key',       emoji: '🗝️', label: 'Key'        },
@@ -34,6 +42,17 @@ const AVATAR_COLORS = [
   'bg-orange-100 text-orange-700',
 ];
 
+const ROLE_CONFIG: Record<string, { icon: string; label: string; bg: string; text: string; ring: string; desc: string; pts?: string }> = {
+  police:   { icon: '🚔', label: 'Police',   bg: 'bg-blue-50',    text: 'text-blue-700',    ring: 'ring-blue-200',    desc: 'Memorise everyone\'s tokens. You\'ll have a few seconds to observe before you guess. Catch the Thief for 500 pts!' },
+  thief:    { icon: '🦹', label: 'Thief',    bg: 'bg-red-50',     text: 'text-red-700',     ring: 'ring-red-200',     desc: 'You stole something! Stay calm and don\'t let the police figure out it\'s you. Escape for 500 pts!' },
+  king:     { icon: '👑', label: 'King',     bg: 'bg-yellow-50',  text: 'text-yellow-700',  ring: 'ring-yellow-200',  desc: 'You are royalty! You automatically earn 2000 pts this round — no matter what happens.',  pts: '+2000' },
+  queen:    { icon: '👸', label: 'Queen',    bg: 'bg-pink-50',    text: 'text-pink-700',    ring: 'ring-pink-200',    desc: 'You are the Queen! You automatically earn 1000 pts this round.',                          pts: '+1000' },
+  minister: { icon: '🎩', label: 'Minister', bg: 'bg-purple-50',  text: 'text-purple-700',  ring: 'ring-purple-200',  desc: 'You are the Minister! You automatically earn 700 pts this round.',                       pts: '+700'  },
+  civilian: { icon: '🧑', label: 'Civilian', bg: 'bg-green-50',   text: 'text-green-700',   ring: 'ring-green-200',   desc: 'You\'re a civilian. Watch the drama unfold!' },
+};
+
+const TOTAL_ROUNDS = 10;
+
 function tokenLabel(id: string | null) {
   if (!id) return null;
   const t = TOKENS.find(t => t.id === id);
@@ -50,26 +69,47 @@ function Avatar({ name, index, size = 'md' }: { name: string; index: number; siz
   );
 }
 
+const CONFETTI_COLORS = ['bg-yellow-400', 'bg-pink-400', 'bg-blue-400', 'bg-green-400', 'bg-purple-400', 'bg-red-400', 'bg-orange-400'];
+
+function Confetti() {
+  const pieces = Array.from({ length: 24 }, (_, i) => i);
+  return (
+    <div className="fixed inset-0 pointer-events-none overflow-hidden z-50">
+      {pieces.map(i => (
+        <div
+          key={i}
+          className={`absolute w-2.5 h-2.5 rounded-sm ${CONFETTI_COLORS[i % CONFETTI_COLORS.length]}`}
+          style={{
+            left: `${(i / pieces.length) * 100}%`,
+            top: '-16px',
+            animation: `confetti-fall ${1.6 + (i % 4) * 0.4}s ease-in ${((i * 0.13) % 1).toFixed(2)}s infinite`,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
 export default function RoomPage() {
   const { code } = useParams<{ code: string }>();
   const router = useRouter();
 
-  const [room, setRoom] = useState<Room | null>(null);
-  const [players, setPlayers] = useState<Player[]>([]);
-  const [myPlayerId, setMyPlayerId] = useState<number | null>(null);
-  const [myRole, setMyRole] = useState<string | null>(null);
+  const [room, setRoom]               = useState<Room | null>(null);
+  const [players, setPlayers]         = useState<Player[]>([]);
+  const [myPlayerId, setMyPlayerId]   = useState<number | null>(null);
+  const [myRole, setMyRole]           = useState<string | null>(null);
   const [roleRevealed, setRoleRevealed] = useState(false);
-  const [countdown, setCountdown] = useState(5);
+  const [countdown, setCountdown]     = useState(5);
   const [countingDown, setCountingDown] = useState(false);
   const [hideCountdown, setHideCountdown] = useState(5);
-  const [roleHidden, setRoleHidden] = useState(false);
+  const [roleHidden, setRoleHidden]   = useState(false);
   const [guessResult, setGuessResult] = useState<GuessResult | null>(null);
   const [selectedToken, setSelectedToken] = useState<string | null>(null);
   const [selectedGuess, setSelectedGuess] = useState<number | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading]         = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [copied, setCopied] = useState(false);
+  const [error, setError]             = useState('');
+  const [copied, setCopied]           = useState(false);
 
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -81,9 +121,7 @@ export default function RoomPage() {
     const data = await res.json();
     setRoom(data.room);
     setPlayers(data.players);
-    // Sync role — safe because the reveal UI is gated by roleRevealed, not myRole
     if (data.myRole) setMyRole(data.myRole);
-    // Sync persisted result so ALL devices exit the loading spinner simultaneously
     if (data.result) setGuessResult(data.result);
     setLoading(false);
   }, [code, myPlayerId, router]);
@@ -99,8 +137,6 @@ export default function RoomPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [code]);
 
-  // Poll every 2 s in all states — primary update mechanism when Pusher isn't
-  // configured, and a safety net for any missed events.
   useEffect(() => {
     if (!myPlayerId) return;
     const interval = setInterval(() => fetchRoom(), 2000);
@@ -125,25 +161,21 @@ export default function RoomPage() {
     });
     channel.bind('guessing-started', () => {
       setRoom(prev => prev ? { ...prev, state: 'guessing' } : prev);
-      fetchRoom(); // immediately sync myRole so police sees guess UI without delay
+      fetchRoom();
     });
     channel.bind('guess-made', (data: GuessResult & { players: Player[] }) => {
-      setRoom(prev => prev ? { ...prev, state: 'result' } : prev);
+      setRoom(prev => prev ? { ...prev, state: data.gameOver ? 'gameover' : 'result' } : prev);
       setGuessResult(data);
       setPlayers(data.players);
     });
     channel.bind('next-round', () => {
       setRoom(prev => prev ? { ...prev, state: 'waiting' } : prev);
-      setRoleRevealed(false);
-      setRoleHidden(false);
-      setHideCountdown(5);
-      setGuessResult(null);
-      setMyRole(null);
-      setSelectedToken(null);
-      setSelectedGuess(null);
-      setCountingDown(false);
-      setCountdown(5);
-      if (countdownRef.current) clearInterval(countdownRef.current);
+      resetRoundState();
+      fetchRoom();
+    });
+    channel.bind('new-game', () => {
+      setRoom(prev => prev ? { ...prev, state: 'waiting', roundCount: 0 } : prev);
+      resetRoundState();
       fetchRoom();
     });
 
@@ -153,11 +185,23 @@ export default function RoomPage() {
 
   useEffect(() => () => { if (countdownRef.current) clearInterval(countdownRef.current); }, []);
 
+  function resetRoundState() {
+    setRoleRevealed(false);
+    setRoleHidden(false);
+    setHideCountdown(5);
+    setGuessResult(null);
+    setMyRole(null);
+    setSelectedToken(null);
+    setSelectedGuess(null);
+    setCountingDown(false);
+    setCountdown(5);
+    if (countdownRef.current) clearInterval(countdownRef.current);
+  }
+
   // ── Handlers ──────────────────────────────────────────────────────────────
 
   async function handleRevealRole() {
     if (!myPlayerId) return;
-    // Use cached role if already fetched, otherwise fetch now
     let role = myRole;
     if (!role) {
       const res = await fetch(`/api/room/${code}?playerId=${myPlayerId}`);
@@ -185,12 +229,10 @@ export default function RoomPage() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ action: 'start-guessing' }),
           });
-          // Immediately apply guessing state so police sees the guess UI
           setRoom(prev => prev ? { ...prev, state: 'guessing' } : prev);
         }
       }, 1000);
     } else {
-      // Non-police: auto-hide role after 5 s so others can't peek at the screen
       let h = 5;
       const hideTimer = setInterval(() => {
         h--;
@@ -241,9 +283,6 @@ export default function RoomPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ roomCode: code, guessedPlayerId: selectedGuess }),
     });
-    // Result is stored in DB — fetchRoom will pick it up for ALL devices at the
-    // same time via polling. Do NOT apply it locally here so the police and
-    // everyone else see the reveal simultaneously.
     await fetchRoom();
     setActionLoading(false);
   }
@@ -255,13 +294,19 @@ export default function RoomPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'next-round' }),
     });
-    setRoleRevealed(false);
-    setRoleHidden(false);
-    setHideCountdown(5);
-    setGuessResult(null);
-    setMyRole(null);
-    setSelectedToken(null);
-    setSelectedGuess(null);
+    resetRoundState();
+    await fetchRoom();
+    setActionLoading(false);
+  }
+
+  async function handleNewGame() {
+    setActionLoading(true);
+    await fetch(`/api/room/${code}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'new-game' }),
+    });
+    resetRoundState();
     await fetchRoom();
     setActionLoading(false);
   }
@@ -270,13 +315,14 @@ export default function RoomPage() {
     navigator.clipboard.writeText(code).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); });
   }
 
-  const myPlayer = players.find(p => p.id === myPlayerId);
-  const myPlayerIndex = players.findIndex(p => p.id === myPlayerId);
-  const isHost = players[0]?.id === myPlayerId;
-  const tokensPicked = players.filter(p => p.token).length;
-  const allHaveTokens = players.length >= 4 && tokensPicked === players.length;
-  const takenTokens = new Set(players.filter(p => p.id !== myPlayerId && p.token).map(p => p.token as string));
-  const hasScores = players.some(p => p.score > 0);
+  const myPlayer       = players.find(p => p.id === myPlayerId);
+  const myPlayerIndex  = players.findIndex(p => p.id === myPlayerId);
+  const isHost         = players[0]?.id === myPlayerId;
+  const tokensPicked   = players.filter(p => p.token).length;
+  const allHaveTokens  = players.length >= 4 && tokensPicked === players.length;
+  const takenTokens    = new Set(players.filter(p => p.id !== myPlayerId && p.token).map(p => p.token as string));
+  const hasScores      = players.some(p => p.score > 0);
+  const roundCount     = room?.roundCount ?? 0;
 
   // ── Loading ───────────────────────────────────────────────────────────────
 
@@ -293,7 +339,7 @@ export default function RoomPage() {
 
   if (!room) return null;
 
-  // ── Room code badge (reused across phases) ────────────────────────────────
+  // ── Room code badge ────────────────────────────────────────────────────────
 
   const RoomBadge = () => (
     <button onClick={copyCode} className="flex items-center gap-2 self-center bg-white border border-gray-200 rounded-xl px-4 py-2 shadow-sm hover:shadow transition-all">
@@ -301,6 +347,14 @@ export default function RoomPage() {
       <span className="font-bold tracking-widest text-gray-900 font-mono text-lg">{code}</span>
       <span className="text-gray-300 text-sm">{copied ? '✓' : '⎘'}</span>
     </button>
+  );
+
+  const RoundBadge = () => (
+    <div className="flex items-center justify-center">
+      <span className="text-xs font-semibold bg-gray-900 text-white px-3 py-1 rounded-full">
+        Round {roundCount} / {TOTAL_ROUNDS}
+      </span>
+    </div>
   );
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -311,6 +365,7 @@ export default function RoomPage() {
     return (
       <div className="flex flex-col gap-4">
         <RoomBadge />
+        {hasScores && <RoundBadge />}
 
         {/* Player list */}
         <div className="card">
@@ -358,6 +413,28 @@ export default function RoomPage() {
           )}
         </div>
 
+        {/* Role legend */}
+        <div className="card">
+          <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Roles &amp; Points</h3>
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            {[
+              { icon: '👑', label: 'King',     pts: '2000 pts' },
+              { icon: '👸', label: 'Queen',    pts: '1000 pts' },
+              { icon: '🎩', label: 'Minister', pts: '700 pts'  },
+              { icon: '🚔', label: 'Police',   pts: '500 pts (catch)' },
+              { icon: '🦹', label: 'Thief',    pts: '500 pts (escape)' },
+            ].map(r => (
+              <div key={r.label} className="flex items-center gap-2">
+                <span className="text-base">{r.icon}</span>
+                <div>
+                  <p className="font-semibold text-gray-700 leading-tight">{r.label}</p>
+                  <p className="text-gray-400 leading-tight">{r.pts}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
         {/* Scoreboard — only after at least one round */}
         {hasScores && (
           <div className="card">
@@ -388,7 +465,7 @@ export default function RoomPage() {
             <p className="text-sm text-gray-400 mb-4">Choose an item — each token can only be held by one player</p>
             <div className="grid grid-cols-4 gap-2 mb-4">
               {TOKENS.map(t => {
-                const taken = takenTokens.has(t.id);
+                const taken    = takenTokens.has(t.id);
                 const selected = selectedToken === t.id;
                 return (
                   <button
@@ -405,9 +482,7 @@ export default function RoomPage() {
                   >
                     <span className="text-2xl leading-none">{t.emoji}</span>
                     <span className="text-[10px] text-gray-500 leading-tight">{t.label}</span>
-                    {taken && (
-                      <span className="absolute top-1 right-1 text-[8px] text-gray-400 font-bold">✕</span>
-                    )}
+                    {taken && <span className="absolute top-1 right-1 text-[8px] text-gray-400 font-bold">✕</span>}
                   </button>
                 );
               })}
@@ -450,16 +525,12 @@ export default function RoomPage() {
   // ═══════════════════════════════════════════════════════════════════════════
 
   if (room.state === 'revealing') {
-    const roleConfig: Record<string, { icon: string; label: string; bg: string; text: string; ring: string; desc: string }> = {
-      police:   { icon: '🚔', label: 'Police',   bg: 'bg-blue-50',   text: 'text-blue-700',  ring: 'ring-blue-200',  desc: 'Memorise everyone\'s tokens. You\'ll have a few seconds to observe before you guess.' },
-      thief:    { icon: '🦹', label: 'Thief',    bg: 'bg-red-50',    text: 'text-red-700',   ring: 'ring-red-200',   desc: 'You stole something! Stay calm and don\'t let the police figure out it\'s you.' },
-      civilian: { icon: '🧑', label: 'Civilian', bg: 'bg-green-50',  text: 'text-green-700', ring: 'ring-green-200', desc: 'You\'re innocent. Watch the drama unfold!' },
-    };
-    const cfg = myRole && roleConfig[myRole];
+    const cfg = myRole ? ROLE_CONFIG[myRole] : null;
 
     return (
       <div className="flex flex-col gap-4">
         <RoomBadge />
+        <RoundBadge />
 
         <div className="card flex flex-col items-center text-center gap-5">
           {!roleRevealed ? (
@@ -483,6 +554,11 @@ export default function RoomPage() {
               <div>
                 <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-1">You are the</p>
                 <h2 className={`text-4xl font-black ${cfg.text}`}>{cfg.label}</h2>
+                {cfg.pts && (
+                  <span className="inline-block mt-1 text-sm font-bold text-green-600 bg-green-50 border border-green-100 px-3 py-0.5 rounded-full">
+                    {cfg.pts} this round
+                  </span>
+                )}
               </div>
               <p className="text-gray-500 text-sm max-w-xs">{cfg.desc}</p>
 
@@ -547,7 +623,6 @@ export default function RoomPage() {
   // ═══════════════════════════════════════════════════════════════════════════
 
   if (room.state === 'guessing') {
-    // myRole may arrive a tick late via polling — wait rather than showing wrong UI
     if (!myRole) {
       return (
         <div className="flex items-center justify-center min-h-[80vh]">
@@ -558,14 +633,15 @@ export default function RoomPage() {
         </div>
       );
     }
-    const isPolice = myRole === 'police';
-    const suspects = players.filter(p => p.id !== myPlayerId);
+    const isPolice      = myRole === 'police';
+    const suspects      = players.filter(p => p.id !== myPlayerId);
     const selectedPlayer = players.find(p => p.id === selectedGuess);
 
     if (!isPolice) {
       return (
         <div className="flex flex-col gap-4">
           <RoomBadge />
+          <RoundBadge />
           <div className="card flex flex-col items-center gap-5 py-8 text-center">
             <div className="relative">
               <div className="w-20 h-20 bg-blue-50 rounded-full flex items-center justify-center text-4xl">🚔</div>
@@ -604,9 +680,9 @@ export default function RoomPage() {
         </div>
 
         <div className="flex flex-col gap-2">
-          {suspects.map((p, i) => {
+          {suspects.map((p) => {
             const playerIndex = players.findIndex(pl => pl.id === p.id);
-            const isSelected = selectedGuess === p.id;
+            const isSelected  = selectedGuess === p.id;
             return (
               <button
                 key={p.id}
@@ -633,19 +709,12 @@ export default function RoomPage() {
         </div>
 
         {selectedPlayer && (
-          <button
-            onClick={handleMakeGuess}
-            disabled={actionLoading}
-            className="btn-primary w-full text-base py-4"
-          >
+          <button onClick={handleMakeGuess} disabled={actionLoading} className="btn-primary w-full text-base py-4">
             {actionLoading ? 'Submitting...' : `Accuse ${selectedPlayer.name} 🚨`}
           </button>
         )}
-
         {!selectedPlayer && (
-          <div className="text-center text-sm text-gray-400 py-2">
-            Tap a player to select them
-          </div>
+          <div className="text-center text-sm text-gray-400 py-2">Tap a player to select them</div>
         )}
       </div>
     );
@@ -666,6 +735,8 @@ export default function RoomPage() {
 
     return (
       <div className="flex flex-col gap-4">
+        <RoundBadge />
+
         <div className={`card text-center py-7 border-2 ${guessResult.correct ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50'}`}>
           <div className="text-5xl mb-3">{guessResult.correct ? '🎉' : '💀'}</div>
           <h1 className="text-2xl font-black text-gray-900">
@@ -681,9 +752,7 @@ export default function RoomPage() {
         <div className="card">
           <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">The Thief Was</p>
           <div className="flex items-center gap-4">
-            <div className="w-14 h-14 bg-red-50 ring-2 ring-red-200 rounded-2xl flex items-center justify-center text-3xl">
-              🦹
-            </div>
+            <div className="w-14 h-14 bg-red-50 ring-2 ring-red-200 rounded-2xl flex items-center justify-center text-3xl">🦹</div>
             <div>
               <p className="text-xl font-black text-gray-900">{guessResult.thiefName}</p>
               <p className="text-gray-400 text-sm">carrying {tokenLabel(guessResult.thiefToken)}</p>
@@ -698,6 +767,7 @@ export default function RoomPage() {
               .sort((a, b) => b.score - a.score)
               .map((p, i) => {
                 const playerIndex = players.findIndex(pl => pl.id === p.id);
+                const earned = guessResult.pointsEarned?.find(pe => pe.id === p.id);
                 return (
                   <div key={p.id} className="flex items-center gap-3 py-1">
                     <span className="text-xs font-bold text-gray-300 w-4">#{i + 1}</span>
@@ -706,6 +776,11 @@ export default function RoomPage() {
                       {p.name}
                       {p.id === myPlayerId && <span className="text-gray-400 font-normal text-sm"> (you)</span>}
                     </span>
+                    {earned && (
+                      <span className="text-xs font-bold text-green-600 bg-green-50 border border-green-100 px-1.5 py-0.5 rounded">
+                        +{earned.pts}
+                      </span>
+                    )}
                     <span className="font-black text-gray-900 text-lg">{p.score}</span>
                     <span className="text-xs text-gray-400">pts</span>
                   </div>
@@ -721,6 +796,89 @@ export default function RoomPage() {
         ) : (
           <div className="card text-center text-gray-400 text-sm py-3">
             Waiting for host to start next round...
+          </div>
+        )}
+
+        <button onClick={() => router.push('/')} className="btn-secondary w-full">
+          Leave Game
+        </button>
+      </div>
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // GAME OVER
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  if (room.state === 'gameover') {
+    const sortedPlayers = [...players].sort((a, b) => b.score - a.score);
+    const winner = sortedPlayers[0];
+    const medals = ['🥇', '🥈', '🥉'];
+    const isWinner = winner?.id === myPlayerId;
+
+    return (
+      <div className="flex flex-col gap-4">
+        <Confetti />
+
+        {/* Winner banner */}
+        <div
+          className="card text-center py-10 border-2 border-yellow-300 overflow-hidden relative"
+          style={{ background: 'linear-gradient(135deg, #fefce8 0%, #fff7ed 100%)' }}
+        >
+          <div className="text-6xl animate-bounce mb-4">🏆</div>
+          <p className="text-xs font-semibold text-yellow-600 uppercase tracking-widest mb-2">
+            Game Over — {TOTAL_ROUNDS} Rounds Complete!
+          </p>
+          <h1
+            className="text-4xl font-black text-gray-900 mb-1"
+            style={{ animation: 'winner-pop 0.6s ease-out both' }}
+          >
+            {winner?.name}
+          </h1>
+          <p className="text-yellow-700 font-bold text-xl">{winner?.score} pts</p>
+          {isWinner && (
+            <p className="mt-3 text-sm font-semibold text-yellow-600 bg-yellow-100 inline-block px-4 py-1 rounded-full">
+              🎊 That&apos;s you!
+            </p>
+          )}
+        </div>
+
+        {/* Final leaderboard */}
+        <div className="card">
+          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Final Standings</p>
+          <div className="flex flex-col gap-2">
+            {sortedPlayers.map((p, i) => {
+              const playerIndex = players.findIndex(pl => pl.id === p.id);
+              const isTop       = i === 0;
+              return (
+                <div
+                  key={p.id}
+                  className={`flex items-center gap-3 py-2 px-2 rounded-xl transition-all ${
+                    isTop ? 'bg-yellow-50 border border-yellow-100' : ''
+                  }`}
+                >
+                  <span className="text-xl w-7 text-center">{medals[i] ?? `#${i + 1}`}</span>
+                  <Avatar name={p.name} index={playerIndex} size="sm" />
+                  <span className={`flex-1 font-medium truncate ${isTop ? 'text-yellow-800' : 'text-gray-800'}`}>
+                    {p.name}{p.id === myPlayerId ? ' (you)' : ''}
+                  </span>
+                  <span className={`font-black text-lg ${isTop ? 'text-yellow-700' : 'text-gray-900'}`}>
+                    {p.score}
+                  </span>
+                  <span className="text-xs text-gray-400">pts</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {isHost ? (
+          <button onClick={handleNewGame} disabled={actionLoading} className="btn-primary w-full py-4 text-base">
+            {actionLoading ? 'Resetting...' : '🎮 Play Again'}
+          </button>
+        ) : (
+          <div className="card text-center text-gray-400 text-sm py-3">
+            Waiting for host to start a new game...
           </div>
         )}
 

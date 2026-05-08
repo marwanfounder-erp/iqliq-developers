@@ -3,8 +3,11 @@ CREATE TABLE IF NOT EXISTS rooms (
   code        VARCHAR(6) UNIQUE NOT NULL,
   state       VARCHAR(20) NOT NULL DEFAULT 'waiting',
   result_json TEXT,
+  round_count INTEGER NOT NULL DEFAULT 0,
   created_at  TIMESTAMP DEFAULT NOW()
 );
+-- Migration (run once if table already exists):
+-- ALTER TABLE rooms ADD COLUMN IF NOT EXISTS round_count INTEGER NOT NULL DEFAULT 0;
 
 CREATE TABLE IF NOT EXISTS players (
   id      SERIAL PRIMARY KEY,

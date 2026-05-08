@@ -22,17 +22,28 @@ export async function GET(req: NextRequest, { params }: { params: { code: string
       myRole = player?.role ?? null;
     }
 
-    // result_json is a newer column — fetch separately so a missing column
-    // (before running the migration) never crashes the whole endpoint.
     let result: Record<string, unknown> | null = null;
     try {
       const [row] = await sql`SELECT result_json FROM rooms WHERE id = ${room.id}`;
       result = row?.result_json ? JSON.parse(row.result_json) : null;
     } catch {
-      // column not yet added — run: ALTER TABLE rooms ADD COLUMN IF NOT EXISTS result_json TEXT;
+      // column not yet added
     }
 
-    return NextResponse.json({ room: { id: room.id, code: room.code, state: room.state }, players, myRole, result });
+    let roundCount = 0;
+    try {
+      const [rr] = await sql`SELECT round_count FROM rooms WHERE id = ${room.id}`;
+      roundCount = rr?.round_count ?? 0;
+    } catch {
+      // column not yet added — run migration in schema.sql
+    }
+
+    return NextResponse.json({
+      room: { id: room.id, code: room.code, state: room.state, roundCount },
+      players,
+      myRole,
+      result,
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error('[room GET]', message);
@@ -49,12 +60,31 @@ export async function POST(req: NextRequest, { params }: { params: { code: strin
     if (!room) return NextResponse.json({ error: 'Room not found' }, { status: 404 });
 
     if (action === 'next-round') {
+      if (room.state === 'gameover') {
+        return NextResponse.json({ error: 'Game is over. Start a new game instead.' }, { status: 400 });
+      }
       await sql`UPDATE players SET token = NULL, role = NULL WHERE room_id = ${room.id}`;
       await sql`UPDATE rooms SET state = 'waiting', result_json = NULL WHERE id = ${room.id}`;
       try {
         await pusher.trigger(`room-${room.code}`, 'next-round', {});
       } catch (pusherErr) {
         console.error('[room POST next-round] Pusher failed:', pusherErr instanceof Error ? pusherErr.message : pusherErr);
+      }
+      return NextResponse.json({ ok: true });
+    }
+
+    if (action === 'new-game') {
+      await sql`UPDATE players SET token = NULL, role = NULL, score = 0 WHERE room_id = ${room.id}`;
+      await sql`UPDATE rooms SET state = 'waiting', result_json = NULL WHERE id = ${room.id}`;
+      try {
+        await sql`UPDATE rooms SET round_count = 0 WHERE id = ${room.id}`;
+      } catch {
+        // column not yet added
+      }
+      try {
+        await pusher.trigger(`room-${room.code}`, 'new-game', {});
+      } catch (pusherErr) {
+        console.error('[room POST new-game] Pusher failed:', pusherErr instanceof Error ? pusherErr.message : pusherErr);
       }
       return NextResponse.json({ ok: true });
     }

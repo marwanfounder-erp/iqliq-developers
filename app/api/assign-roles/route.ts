@@ -11,6 +11,15 @@ function shuffle<T>(arr: T[]): T[] {
   return a;
 }
 
+function buildRoles(count: number): string[] {
+  // Base roles always present: police + thief + king + queen (minimum 4)
+  const roles = ['police', 'thief', 'king', 'queen'];
+  if (count >= 5) roles.push('minister');
+  // Fill remaining slots with civilians for 6-8 players
+  while (roles.length < count) roles.push('civilian');
+  return roles;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const { roomCode } = await req.json();
@@ -33,9 +42,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'All players must pick a token first' }, { status: 400 });
     }
 
-    // Atomically claim the state transition — prevents duplicate role assignment
-    // if two requests arrive simultaneously (race condition / double-tap).
-    // Only one UPDATE will match WHERE state='waiting'; the other gets 0 rows.
+    // Atomically claim the state transition to prevent double role assignment
     const claimed = await sql`
       UPDATE rooms SET state = 'revealing'
       WHERE id = ${room.id} AND state = 'waiting'
@@ -45,8 +52,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Game already started' }, { status: 400 });
     }
 
-    // State is now exclusively ours — assign roles safely
-    const roles: string[] = ['thief', 'police', ...Array(players.length - 2).fill('civilian')];
+    const roles = buildRoles(players.length);
     const shuffled = shuffle(roles);
 
     for (let i = 0; i < players.length; i++) {
