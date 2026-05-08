@@ -16,8 +16,8 @@ export async function POST(req: NextRequest) {
     }
 
     const existingPlayers = await sql`SELECT id FROM players WHERE room_id = ${room.id}`;
-    if (existingPlayers.length >= 8) {
-      return NextResponse.json({ error: 'Room is full' }, { status: 400 });
+    if (existingPlayers.length >= 12) {
+      return NextResponse.json({ error: 'Room is full (max 12 players)' }, { status: 400 });
     }
 
     const [player] = await sql`

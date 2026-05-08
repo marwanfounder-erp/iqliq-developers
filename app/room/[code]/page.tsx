@@ -390,7 +390,7 @@ export default function RoomPage() {
         <div className="card">
           <div className="flex items-center justify-between mb-4">
             <h2 className="font-semibold text-gray-900">Players</h2>
-            <span className="text-xs text-gray-400 bg-gray-100 px-2 py-1 rounded-full">{players.length} joined</span>
+            <span className="text-xs text-gray-400 bg-gray-100 px-2 py-1 rounded-full">{players.length} / 12 joined</span>
           </div>
           <div className="flex flex-col gap-3">
             {players.map((p, i) => (

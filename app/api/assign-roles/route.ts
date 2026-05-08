@@ -12,10 +12,9 @@ function shuffle<T>(arr: T[]): T[] {
 }
 
 function buildRoles(count: number): string[] {
-  // Base roles always present: police + thief + king + queen (minimum 4)
+  // Fixed roles: police, thief, king, queen (4), minister (5th). Everyone beyond 5th is civilian.
   const roles = ['police', 'thief', 'king', 'queen'];
   if (count >= 5) roles.push('minister');
-  // Fill remaining slots with civilians for 6-8 players
   while (roles.length < count) roles.push('civilian');
   return roles;
 }
