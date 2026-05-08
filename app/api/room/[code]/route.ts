@@ -15,11 +15,18 @@ export async function GET(req: NextRequest, { params }: { params: { code: string
     `;
 
     let myRole: string | null = null;
+    let fellowPolice: { name: string; token: string | null }[] = [];
     if (playerId) {
       const [player] = await sql`
         SELECT role FROM players WHERE id = ${parseInt(playerId)} AND room_id = ${room.id}
       `;
       myRole = player?.role ?? null;
+      if (myRole === 'police') {
+        fellowPolice = await sql`
+          SELECT name, token FROM players
+          WHERE room_id = ${room.id} AND role = 'police' AND id != ${parseInt(playerId)}
+        ` as { name: string; token: string | null }[];
+      }
     }
 
     let result: Record<string, unknown> | null = null;
@@ -42,6 +49,7 @@ export async function GET(req: NextRequest, { params }: { params: { code: string
       room: { id: room.id, code: room.code, state: room.state, roundCount },
       players,
       myRole,
+      fellowPolice,
       result,
     });
   } catch (err) {

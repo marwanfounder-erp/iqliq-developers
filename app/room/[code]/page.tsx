@@ -98,6 +98,7 @@ export default function RoomPage() {
   const [players, setPlayers]         = useState<Player[]>([]);
   const [myPlayerId, setMyPlayerId]   = useState<number | null>(null);
   const [myRole, setMyRole]           = useState<string | null>(null);
+  const [fellowPolice, setFellowPolice] = useState<{ name: string; token: string | null }[]>([]);
   const [roleRevealed, setRoleRevealed] = useState(false);
   const [countdown, setCountdown]     = useState(5);
   const [countingDown, setCountingDown] = useState(false);
@@ -191,6 +192,7 @@ export default function RoomPage() {
     setHideCountdown(5);
     setGuessResult(null);
     setMyRole(null);
+    setFellowPolice([]);
     setSelectedToken(null);
     setSelectedGuess(null);
     setCountingDown(false);
@@ -208,6 +210,7 @@ export default function RoomPage() {
       const data = await res.json();
       role = data.myRole;
       setMyRole(role);
+      if (data.fellowPolice?.length) setFellowPolice(data.fellowPolice);
     }
     setRoleRevealed(true);
     setRoleHidden(false);
@@ -561,6 +564,25 @@ export default function RoomPage() {
                 )}
               </div>
               <p className="text-gray-500 text-sm max-w-xs">{cfg.desc}</p>
+
+              {myRole === 'police' && fellowPolice.length > 0 && (
+                <div className="w-full bg-blue-50 border border-blue-100 rounded-2xl p-4">
+                  <p className="text-xs font-semibold text-blue-500 uppercase tracking-widest mb-3">Your fellow officers</p>
+                  <div className="flex flex-col gap-2">
+                    {fellowPolice.map((p, i) => (
+                      <div key={i} className="flex items-center gap-3">
+                        <div className="w-8 h-8 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0">
+                          {p.name[0].toUpperCase()}
+                        </div>
+                        <span className="font-medium text-blue-800">{p.name}</span>
+                        {p.token && (
+                          <span className="ml-auto text-sm text-blue-500">{tokenLabel(p.token)}</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {myRole === 'police' && countingDown && (
                 <div className="w-full">
