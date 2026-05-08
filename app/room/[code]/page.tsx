@@ -99,6 +99,7 @@ export default function RoomPage() {
   const [myPlayerId, setMyPlayerId]   = useState<number | null>(null);
   const [myRole, setMyRole]           = useState<string | null>(null);
   const [fellowPolice, setFellowPolice] = useState<{ name: string; token: string | null }[]>([]);
+  const [policePlayer, setPolicePlayer] = useState<{ name: string; token: string | null } | null>(null);
   const [roleRevealed, setRoleRevealed] = useState(false);
   const [countdown, setCountdown]     = useState(5);
   const [countingDown, setCountingDown] = useState(false);
@@ -123,6 +124,7 @@ export default function RoomPage() {
     setRoom(data.room);
     setPlayers(data.players);
     if (data.myRole) setMyRole(data.myRole);
+    if (data.policePlayer) setPolicePlayer(data.policePlayer);
     if (data.result) setGuessResult(data.result);
     setLoading(false);
   }, [code, myPlayerId, router]);
@@ -201,6 +203,7 @@ export default function RoomPage() {
     setGuessResult(null);
     setMyRole(null);
     setFellowPolice([]);
+    setPolicePlayer(null);
     setSelectedToken(null);
     setSelectedGuess(null);
     setCountingDown(false);
@@ -649,14 +652,32 @@ export default function RoomPage() {
           ) : null}
         </div>
 
+        {policePlayer && (
+          <div className="card flex items-center gap-4 py-4">
+            <div className="w-12 h-12 bg-blue-50 ring-2 ring-blue-200 rounded-2xl flex items-center justify-center text-2xl flex-shrink-0">
+              🚔
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-[11px] font-semibold text-blue-400 uppercase tracking-widest mb-0.5">Police this round</p>
+              <p className="font-bold text-blue-800 text-lg leading-tight truncate">{policePlayer.name}</p>
+              {policePlayer.token && (
+                <p className="text-sm text-blue-400 mt-0.5">{tokenLabel(policePlayer.token)}</p>
+              )}
+            </div>
+            <span className="text-xs bg-blue-100 text-blue-600 font-semibold px-2.5 py-1 rounded-full shrink-0">+500 pts</span>
+          </div>
+        )}
+
         <div className="card">
-          <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">All Players</h3>
+          <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Players this round</h3>
           <div className="flex flex-col gap-3">
             {players.map((p, i) => (
               <div key={p.id} className="flex items-center gap-3">
                 <Avatar name={p.name} index={i} size="sm" />
-                <span className="flex-1 text-gray-700 font-medium">{p.name}{p.id === myPlayerId ? ' (you)' : ''}</span>
-                <span className="text-gray-400 text-sm">{tokenLabel(p.token)}</span>
+                <span className="flex-1 text-gray-700 font-medium truncate">
+                  {p.name}{p.id === myPlayerId ? <span className="text-xs text-gray-400 ml-1">you</span> : ''}
+                </span>
+                <span className="text-gray-400 text-sm shrink-0">{tokenLabel(p.token)}</span>
               </div>
             ))}
           </div>

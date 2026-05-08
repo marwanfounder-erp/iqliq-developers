@@ -14,6 +14,14 @@ export async function GET(req: NextRequest, { params }: { params: { code: string
       SELECT id, name, token, score FROM players WHERE room_id = ${room.id} ORDER BY joined_at
     `;
 
+    let policePlayer: { name: string; token: string | null } | null = null;
+    if (room.state === 'revealing' || room.state === 'guessing') {
+      const [pp] = await sql`
+        SELECT name, token FROM players WHERE room_id = ${room.id} AND role = 'police' LIMIT 1
+      `;
+      policePlayer = pp ?? null;
+    }
+
     let myRole: string | null = null;
     let fellowPolice: { name: string; token: string | null }[] = [];
     if (playerId) {
@@ -50,6 +58,7 @@ export async function GET(req: NextRequest, { params }: { params: { code: string
       players,
       myRole,
       fellowPolice,
+      policePlayer,
       result,
     });
   } catch (err) {
