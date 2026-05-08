@@ -62,7 +62,7 @@ export async function GET(req: NextRequest, { params }: { params: { code: string
 export async function POST(req: NextRequest, { params }: { params: { code: string } }) {
   try {
     const { code } = params;
-    const { action } = await req.json();
+    const { action, targetPlayerId } = await req.json();
 
     const [room] = await sql`SELECT id, code, state FROM rooms WHERE code = ${code}`;
     if (!room) return NextResponse.json({ error: 'Room not found' }, { status: 404 });
@@ -106,6 +106,27 @@ export async function POST(req: NextRequest, { params }: { params: { code: strin
         await pusher.trigger(`room-${room.code}`, 'guessing-started', { state: 'guessing' });
       } catch (pusherErr) {
         console.error('[room POST start-guessing] Pusher failed:', pusherErr instanceof Error ? pusherErr.message : pusherErr);
+      }
+      return NextResponse.json({ ok: true });
+    }
+
+    if (action === 'remove-player') {
+      if (room.state !== 'waiting') {
+        return NextResponse.json({ error: 'Can only remove players in waiting phase' }, { status: 400 });
+      }
+      if (!targetPlayerId) {
+        return NextResponse.json({ error: 'targetPlayerId required' }, { status: 400 });
+      }
+      const [host] = await sql`SELECT id FROM players WHERE room_id = ${room.id} ORDER BY joined_at LIMIT 1`;
+      if (targetPlayerId === host?.id) {
+        return NextResponse.json({ error: 'Cannot remove the host' }, { status: 400 });
+      }
+      await sql`DELETE FROM players WHERE id = ${targetPlayerId} AND room_id = ${room.id}`;
+      const updatedPlayers = await sql`SELECT id, name, token, score FROM players WHERE room_id = ${room.id} ORDER BY joined_at`;
+      try {
+        await pusher.trigger(`room-${room.code}`, 'player-removed', { removedPlayerId: targetPlayerId, players: updatedPlayers });
+      } catch (pusherErr) {
+        console.error('[room POST remove-player] Pusher failed:', pusherErr instanceof Error ? pusherErr.message : pusherErr);
       }
       return NextResponse.json({ ok: true });
     }

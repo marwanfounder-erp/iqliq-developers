@@ -154,6 +154,14 @@ export default function RoomPage() {
 
     channel.bind('player-joined', (data: { players: Player[] }) => setPlayers(data.players));
     channel.bind('token-picked', (data: { players: Player[] }) => setPlayers(data.players));
+    channel.bind('player-removed', (data: { removedPlayerId: number; players: Player[] }) => {
+      const storedId = parseInt(sessionStorage.getItem('playerId') ?? '0');
+      if (data.removedPlayerId === storedId) {
+        router.push('/');
+      } else {
+        setPlayers(data.players);
+      }
+    });
     channel.bind('roles-assigned', () => {
       setRoom(prev => prev ? { ...prev, state: 'revealing' } : prev);
       setRoleRevealed(false);
@@ -246,6 +254,14 @@ export default function RoomPage() {
         }
       }, 1000);
     }
+  }
+
+  async function handleRemovePlayer(targetPlayerId: number) {
+    await fetch(`/api/room/${code}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'remove-player', targetPlayerId }),
+    });
   }
 
   async function handlePickToken() {
@@ -395,6 +411,15 @@ export default function RoomPage() {
                     <div className="w-1.5 h-1.5 rounded-full bg-gray-200 animate-bounce" style={{ animationDelay: '150ms' }} />
                     <div className="w-1.5 h-1.5 rounded-full bg-gray-200 animate-bounce" style={{ animationDelay: '300ms' }} />
                   </div>
+                )}
+                {isHost && p.id !== myPlayerId && (
+                  <button
+                    onClick={() => handleRemovePlayer(p.id)}
+                    className="ml-1 w-6 h-6 flex items-center justify-center rounded-full text-gray-300 hover:text-red-400 hover:bg-red-50 transition-colors shrink-0"
+                    title="Remove player"
+                  >
+                    ✕
+                  </button>
                 )}
               </div>
             ))}
