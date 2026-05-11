@@ -55,12 +55,12 @@ export async function POST(req: NextRequest) {
     // Police vs Thief outcome
     if (correct) {
       if (police) {
-        await sql`UPDATE players SET score = score + 500 WHERE id = ${police.id}`;
-        pointsEarned.push({ id: police.id, pts: 500 });
+        await sql`UPDATE players SET score = score + 2500 WHERE id = ${police.id}`;
+        pointsEarned.push({ id: police.id, pts: 2500 });
       }
     } else {
-      await sql`UPDATE players SET score = score + 500 WHERE id = ${thief.id}`;
-      pointsEarned.push({ id: thief.id, pts: 500 });
+      await sql`UPDATE players SET score = score + 700 WHERE id = ${thief.id}`;
+      pointsEarned.push({ id: thief.id, pts: 700 });
     }
 
     // Increment round count and check for game over
